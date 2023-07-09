@@ -50,6 +50,6 @@ spec:
   selector:
     app.kubernetes.io/name: argocd-server
   sessionAffinity: None
-  type: ClusterIP
+  type: NodePort
 status:
   loadBalancer: {}
