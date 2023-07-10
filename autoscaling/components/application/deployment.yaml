@@ -5,7 +5,7 @@ metadata:
   labels:
     app: application-cpu
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: application-cpu
   ports:
@@ -13,6 +13,7 @@ spec:
       name: http
       port: 80
       targetPort: 80
+      nodePort: 30006
 ---
 apiVersion: apps/v1
 kind: Deployment
