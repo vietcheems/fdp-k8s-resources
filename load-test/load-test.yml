@@ -5,4 +5,4 @@ metadata:
 spec:
   containers:
   - name: load-test
-    image: vieetj/load-test:0.2
+    image: vieetj/load-test:0.3

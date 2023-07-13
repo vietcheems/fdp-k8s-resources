@@ -1,6 +1,12 @@
-from locust import FastHttpUser, task
+import requests
+from locust import HttpUser, FastHttpUser, task, User
 
-class User(FastHttpUser):
+
+class TestUser(FastHttpUser):
+    # host = "http://35.185.239.229:30004"
+
     @task
-    def hello_world(self):
-        self.client.get("/")
+    def main_page(self):
+        self.client.get("/", headers={'Connection': 'close'})
+        # url = self.host + "/"
+        # requests.get(url)
