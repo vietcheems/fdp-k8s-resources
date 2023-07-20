@@ -14,7 +14,8 @@ for step in range(DURATION):
     nodes = nodes[1:-1]
     node_count = 0
     for node in nodes:
-        if 'Ready' in node:
+        if node.split()[1] == 'Ready':
+        # if 'Ready' in node:
             node_count += 1
 
     pods = subprocess.run(['kubectl', 'get', 'pod', '-l' ,'app=superset'], stdout=subprocess.PIPE)
@@ -22,7 +23,7 @@ for step in range(DURATION):
     pods = pods[1:-1]
     pod_count = 0
     for pod in pods:
-        if 'Running' in pod:
+        if pod.split()[1] == '1/1' and pod.split()[2] == 'Running':
             pod_count += 1
 
     with open('result.csv', 'a') as f:
