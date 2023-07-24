@@ -1,4 +1,4 @@
-import subprocess, time
+import subprocess, time, datetime
 
 
 DURATION = 300
@@ -27,5 +27,5 @@ for step in range(DURATION):
             pod_count += 1
 
     with open('result.csv', 'a') as f:
-        f.write(f'{step},{node_count},{pod_count}\n')
+        f.write(f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")},{node_count},{pod_count}\n')
     time.sleep(1)
