@@ -1,7 +1,7 @@
 import subprocess, time, datetime
 
 
-DURATION = 300
+DURATION = 600
 
 
 with open('result.csv', 'w') as f:
