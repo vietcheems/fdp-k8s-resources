@@ -1,0 +1,144 @@
+# create VPC
+gcloud compute networks create fdp --subnet-mode custom
+
+
+# create subnet
+gcloud compute networks subnets create k8s \
+  --network fdp \
+  --range 10.240.0.0/24
+
+
+# firewall rules
+gcloud compute firewall-rules create example-k8s-allow-internal \
+  --allow tcp,udp,icmp,ipip \
+  --network k8s \
+  --source-ranges 10.240.0.0/24
+  
+gcloud compute firewall-rules create example-k8s-allow-external \
+  --allow tcp:22,tcp:6443,icmp \
+  --network k8s \
+  --source-ranges 0.0.0.0/0
+
+
+# create controller
+gcloud compute instances create controller \
+    --project=financial-data-platform-386116 \
+    --zone=us-west1-b \
+    --machine-type=e2-medium \
+    --network-interface=network-tier=PREMIUM,private-network-ip=10.240.0.11,stack-type=IPV4_ONLY,subnet=k8s \
+    --can-ip-forward \
+    --maintenance-policy=MIGRATE \
+    --provisioning-model=STANDARD \
+    --service-account=881847588258-compute@developer.gserviceaccount.com \
+    --scopes=https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring.write,https://www.googleapis.com/auth/servicecontrol,https://www.googleapis.com/auth/service.management.readonly,https://www.googleapis.com/auth/trace.append \
+    --create-disk=auto-delete=yes,boot=yes,device-name=instance-1,image=projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20230429,mode=rw,size=10,type=projects/financial-data-platform-386116/zones/us-west1-b/diskTypes/pd-standard \
+    --no-shielded-secure-boot \
+    --shielded-vtpm \
+    --shielded-integrity-monitoring \
+    --labels=ec-src=vm_add-gcloud \
+    --reservation-affinity=any
+    
+    
+# create workers
+for i in 0 1 2; do
+  gcloud compute instances create worker-${i} \
+    --project=financial-data-platform-386116 \
+    --zone=us-west1-b \
+    --machine-type=e2-medium \
+    --network-interface=network-tier=PREMIUM,private-network-ip=10.240.0.2${i},stack-type=IPV4_ONLY,subnet=k8s \
+    --can-ip-forward \
+    --maintenance-policy=MIGRATE \
+    --provisioning-model=STANDARD \
+    --service-account=881847588258-compute@developer.gserviceaccount.com \
+    --scopes=https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/logging.write,https://www.googleapis.com/auth/monitoring.write,https://www.googleapis.com/auth/servicecontrol,https://www.googleapis.com/auth/service.management.readonly,https://www.googleapis.com/auth/trace.append \
+    --create-disk=auto-delete=yes,boot=yes,device-name=instance-1,image=projects/ubuntu-os-cloud/global/images/ubuntu-2204-jammy-v20230429,mode=rw,size=10,type=projects/financial-data-platform-386116/zones/us-west1-b/diskTypes/pd-standard \
+    --no-shielded-secure-boot \
+    --shielded-vtpm \
+    --shielded-integrity-monitoring \
+    --labels=ec-src=vm_add-gcloud \
+    --reservation-affinity=any
+done
+
+    
+# install docker
+sudo apt update
+sudo apt install -y docker.io
+sudo systemctl enable docker.service
+sudo apt install -y apt-transport-https curl
+
+
+# tell containerd to use the systemdCgroup driver via the config file /etc/containerd/config.toml (due to cgroupv2 in Ubuntu 21.04+)
+sudo mkdir /etc/containerd/
+containerd config default | sudo tee /etc/containerd/config.toml
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml  
+sudo service containerd restart
+### sudo service kubelet restart  
+
+
+# install kubeadm, kubectl, kubelet
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
+sudo curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+
+
+# bootstrap cluster
+sudo kubeadm init --pod-network-cidr 192.168.0.0/16
+
+
+# configure kubectl
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+# install calico
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.1/manifests/tigera-operator.yaml
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/custom-resources.yaml
+
+
+# get join commmand
+kubeadm token create --print-join-command
+
+
+# join worker node
+sudo kubeadm join 10.240.0.11:6443 --token 2vdr5j.7r5cuisk9zarv2cg \
+        --discovery-token-ca-cert-hash sha256:53840633f08e61440eb5c5a14216c84f6b3b70e9f69148ad0b476aa6b00fe383
+        
+        
+# create a new disk on gcp
+gcloud compute disks create timescaledb-1 --project=financial-data-platform-386116 --type=pd-standard --size=10GB --zone=us-west1-b
+
+
+# attach the disk to a vm
+gcloud compute instances attach-disk worker-v2-1 --disk timescaledb-1
+
+
+# list attached disks 
+sudo lsblk
+
+
+# format disk
+sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard /dev/sdb
+
+# create mount dir
+sudo mkdir -p /mnt/disks/timescaledb
+
+# mount disk
+sudo mount -o discard,defaults /dev/sdb /mnt/disks/timescaledb
+ 
+# add read, write permissions
+sudo chmod a+w /mnt/disks/timescaledb
+
+
+# configure auto mounting on VM restart
+sudo cp /etc/fstab /etc/fstab.backup            # Create a backup of your current /etc/fstab file
+sudo blkid /dev/sdb				# Use the blkid command to list the UUID for the disk.
+
+# Open the /etc/fstab file in a text editor and create an entry that includes the UUID, e.g.
+UUID="7fc4114c-c27b-45e2-b59b-28815afa39d1"	/mnt/disks/timescaledb	ext4 discard,defaults,nofail	0 2
+
+cat /etc/fstab 					# check the entries
